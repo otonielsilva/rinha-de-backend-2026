@@ -18,6 +18,10 @@ on:
         description: 'Run full load test with latest image'
         required: false
         default: 'true'
+      compose_file:
+        description: 'Docker compose file to use (docker-compose.yml for local build, docker-compose.yaml for remote)'
+        required: false
+        default: 'docker-compose.yml'
 
 env:
   REGISTRY: docker.io
@@ -104,8 +108,9 @@ jobs:
       - name: Run full load test with docker-compose
         env:
           DOCKER_IMAGE: ${{ secrets.DOCKER_HUB_USERNAME }}/rinhabackend-2026:latest
+          COMPOSE_FILE: ${{ github.event.inputs.compose_file || 'docker-compose.yml' }}
         run: |
-          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.load-test.yml"
+          COMPOSE="docker compose -f $COMPOSE_FILE -f docker-compose.load-test.yml"
           $COMPOSE up -d
           # capture k6 exit code without tripping `bash -e` on a non-zero result
           EXIT_CODE=0
