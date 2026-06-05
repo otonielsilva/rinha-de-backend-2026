@@ -1,0 +1,146 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'opt/*'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      run_load_test:
+        description: 'Run full load test with latest image'
+        required: false
+        default: 'true'
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ secrets.DOCKER_HUB_USERNAME }}/rinhabackend-2026
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Run tests
+        run: go test -v ./...
+
+  load-test:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pull latest image from Docker Hub
+        env:
+          DOCKER_IMAGE: ${{ secrets.DOCKER_HUB_USERNAME }}/rinhabackend-2026:latest
+        run: |
+          echo "Pulling latest image: $DOCKER_IMAGE"
+          docker pull "$DOCKER_IMAGE" || {
+            echo "Failed to pull image from Docker Hub"
+            exit 1
+          }
+
+      - name: Run full load test with docker-compose
+        env:
+          DOCKER_IMAGE: ${{ secrets.DOCKER_HUB_USERNAME }}/rinhabackend-2026:latest
+        run: |
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.load-test.yml"
+          $COMPOSE up -d
+          # capture k6 exit code without tripping `bash -e` on a non-zero result
+          EXIT_CODE=0
+          $COMPOSE wait k6-load || EXIT_CODE=$?
+
+          echo "::group::k6 load test output"
+          $COMPOSE logs k6-load
+          echo "::endgroup::"
+
+          echo "::group::api1 / api2 / lb logs"
+          $COMPOSE logs api1 api2 lb
+          echo "::endgroup::"
+
+          echo "::group::container state + OOM + memory"
+          for c in api1 api2 lb; do
+            cid=$($COMPOSE ps -aq $c)
+            [ -z "$cid" ] && { echo "$c: no container"; continue; }
+            echo "$c: $(docker inspect "$cid" --format 'Status={{.State.Status}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Restarts={{.RestartCount}}')"
+            peak=$(docker exec "$cid" sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null' 2>/dev/null || echo "n/a (container not running)")
+            echo "$c memory.peak=$peak"
+          done
+          echo "::endgroup::"
+
+          echo "::group::results.json"
+          cat test/results.json 2>/dev/null || echo "results.json not found"
+          echo "::endgroup::"
+
+          $COMPOSE down -v
+          exit $EXIT_CODE
+
+      - name: Upload load test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: test/results.json
+          if-no-files-found: warn
+          retention-days: 7
