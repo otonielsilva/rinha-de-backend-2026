@@ -1,15 +1,10 @@
 services:
   api1:
-    build: .
-    image: ${DOCKER_IMAGE:-rinhabackend-2026:local}
+    image: ${DOCKER_IMAGE:-docker.io/otonielsilva/rinhabackend-2026:latest}
     environment:
       RINHA_RESOURCES_DIR: /app/resources
       RINHA_CACHE_DIR: /app/cache
-      # ~87MB live heap (3M refs). Soft limit below the 160M cgroup cap forces
-      # the GC to collect before the kernel OOM-kills the process under load.
       GOMEMLIMIT: 140MiB
-      # Container has 0.46 CPU quota; without this Go creates GOMAXPROCS=host_cpus
-      # (4 on GH Actions), causing 4 OS threads to fight for 460ms/sec of CPU.
       GOMAXPROCS: "1"
     volumes:
       - ./resources:/app/resources:ro
@@ -28,8 +23,7 @@ services:
           memory: 160M
 
   api2:
-    build: .
-    image: ${DOCKER_IMAGE:-rinhabackend-2026:local}
+    image: ${DOCKER_IMAGE:-docker.io/otonielsilva/rinhabackend-2026:latest}
     environment:
       RINHA_RESOURCES_DIR: /app/resources
       RINHA_CACHE_DIR: /app/cache
