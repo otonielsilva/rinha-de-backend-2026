@@ -19,6 +19,9 @@ const fpCount = new Counter('fp_count');
 const fnCount = new Counter('fn_count');
 const errorCount = new Counter('error_count');
 
+// Support both Docker network (lb:9999) and host network (localhost:9999)
+const apiHost = __ENV.API_HOST || 'localhost:9999';
+
 export const options = {
     summaryTrendStats: ['p(99)'],
     systemTags: ['status', 'method'],
@@ -57,7 +60,7 @@ export default function () {
     const expectedApproved = entry.expected_approved;
 
     const res = http.post(
-        'http://localhost:9999/fraud-score',
+        `http://${apiHost}/fraud-score`,
         JSON.stringify(entry.request),
         { headers: { 'Content-Type': 'application/json' }, timeout: '2001ms' }
     );

@@ -18,10 +18,6 @@ on:
         description: 'Run full load test with latest image'
         required: false
         default: 'true'
-      compose_file:
-        description: 'Docker compose file to use (docker-compose.yml for local build, docker-compose.yaml for remote)'
-        required: false
-        default: 'docker-compose.yml'
 
 env:
   REGISTRY: docker.io
@@ -60,6 +56,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=1.0
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -108,10 +105,27 @@ jobs:
       - name: Run full load test with docker-compose
         env:
           DOCKER_IMAGE: ${{ secrets.DOCKER_HUB_USERNAME }}/rinhabackend-2026:latest
-          COMPOSE_FILE: ${{ github.event.inputs.compose_file || 'docker-compose.yml' }}
         run: |
-          COMPOSE="docker compose -f $COMPOSE_FILE -f docker-compose.load-test.yml"
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.load-test.yml"
           $COMPOSE up -d
+
+          # Wait for API services to be healthy
+          echo "Waiting for API services to be healthy..."
+          sleep 25
+
+          echo "::group::health check status before k6 wait"
+          $COMPOSE ps
+          echo "::endgroup::"
+
+          # Test nginx health check manually
+          echo "::group::manual nginx health check test"
+          for i in {1..10}; do
+            echo "Attempt $i: testing nginx health..."
+            $COMPOSE exec -T lb wget -q -O /dev/null http://127.0.0.1:9999/ready && echo "✓ nginx /ready OK" && break
+            sleep 2
+          done
+          echo "::endgroup::"
+
           # capture k6 exit code without tripping `bash -e` on a non-zero result
           EXIT_CODE=0
           $COMPOSE wait k6-load || EXIT_CODE=$?
@@ -140,6 +154,36 @@ jobs:
 
           $COMPOSE down -v
           exit $EXIT_CODE
+
+      - name: Capture detailed logs on failure
+        if: failure()
+        env:
+          DOCKER_IMAGE: ${{ secrets.DOCKER_HUB_USERNAME }}/rinhabackend-2026:latest
+        run: |
+          COMPOSE="docker compose -f docker-compose.yml -f docker-compose.load-test.yml"
+
+          echo "::group::all container logs"
+          $COMPOSE logs || true
+          echo "::endgroup::"
+
+          echo "::group::container status"
+          $COMPOSE ps -a
+          echo "::endgroup::"
+
+          echo "::group::container health details"
+          for c in api1 api2 lb k6-load; do
+            cid=$($COMPOSE ps -aq $c)
+            if [ -n "$cid" ]; then
+              echo "=== $c ==="
+              docker inspect "$cid" --format 'Status: {{.State.Status}}, ExitCode: {{.State.ExitCode}}, Error: {{.State.Error}}'
+              # Only show health if container has a health check
+              docker inspect "$cid" --format '{{if .State.Health}}Health: {{.State.Health.Status}}{{else}}Health: not configured{{end}}'
+            fi
+          done
+          echo "::endgroup::"
+
+          # Cleanup
+          $COMPOSE down -v || true
 
       - name: Upload load test results
         if: always()

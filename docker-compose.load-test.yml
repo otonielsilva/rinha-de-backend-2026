@@ -4,14 +4,14 @@ services:
     user: root
     environment:
       - K6_NO_USAGE_REPORT=true
+      - API_HOST=lb:9999
     volumes:
       - ./test:/test
     working_dir: /test
     command: run /test/test.js
-    network_mode: "host"
     depends_on:
       lb:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:

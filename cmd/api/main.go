@@ -2,9 +2,12 @@ package main
 
 import (
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"time"
 
 	"rinha-backend-2026/internal/app"
@@ -12,6 +15,10 @@ import (
 )
 
 func main() {
+	runtime.GOMAXPROCS(1)
+	prev := debug.SetGCPercent(-1)
+	log.Printf("worker-pool: GOMAXPROCS=1, GOGC=off (was %d), GOMEMLIMIT=%s", prev, os.Getenv("GOMEMLIMIT"))
+
 	resourceDir, err := discoverResourceDir()
 	if err != nil {
 		log.Fatal(err)
@@ -35,6 +42,21 @@ func main() {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
+	}
+
+	// uds-nginx: also listen on Unix socket if configured (for low-latency
+	// nginx communication). Always listen on TCP :9999 for health checks.
+	if sockPath := os.Getenv("RINHA_LISTEN_UNIX"); sockPath != "" {
+		_ = os.Remove(sockPath)
+		ln, err := net.Listen("unix", sockPath)
+		if err != nil {
+			log.Fatalf("listen unix %s: %v", sockPath, err)
+		}
+		_ = os.Chmod(sockPath, 0o666)
+		log.Printf("uds-nginx: also listening on unix://%s", sockPath)
+		go func() {
+			log.Fatal(httpServer.Serve(ln))
+		}()
 	}
 
 	log.Printf("api listening on %s using resources at %s", httpServer.Addr, resourceDir)

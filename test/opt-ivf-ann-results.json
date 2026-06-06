@@ -1,0 +1,10 @@
+{
+  "branch": "opt/ivf-ann",
+  "test_date": "2026-06-05T00:20:31-03:00",
+  "duration_seconds": 147,
+  "metrics": {
+    "total_iterations": 21786,
+    "iterations_per_second": 181.55,
+    "test_window_seconds": 120
+  }
+}
