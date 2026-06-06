@@ -1,21 +1,22 @@
 services:
   api1:
-    image: ${DOCKER_IMAGE:-docker.io/otonielsilva/rinhabackend-2026:latest}
+    image: otonielsilva/rinhabackend-2026:1.0
+    pull_policy: always
     environment:
       RINHA_RESOURCES_DIR: /app/resources
       RINHA_CACHE_DIR: /app/cache
+      RINHA_LISTEN_UNIX: /var/run/sockets/api1.sock
       GOMEMLIMIT: 140MiB
       GOMAXPROCS: "1"
     volumes:
       - ./resources:/app/resources:ro
-    expose:
-      - "9999"
+      - socket_vol:/var/run/sockets
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9999/ready || exit 1"]
       interval: 2s
-      timeout: 2s
-      retries: 15
-      start_period: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     deploy:
       resources:
         limits:
@@ -23,22 +24,23 @@ services:
           memory: 160M
 
   api2:
-    image: ${DOCKER_IMAGE:-docker.io/otonielsilva/rinhabackend-2026:latest}
+    image: otonielsilva/rinhabackend-2026:1.0
+    pull_policy: always
     environment:
       RINHA_RESOURCES_DIR: /app/resources
       RINHA_CACHE_DIR: /app/cache
+      RINHA_LISTEN_UNIX: /var/run/sockets/api2.sock
       GOMEMLIMIT: 140MiB
       GOMAXPROCS: "1"
     volumes:
       - ./resources:/app/resources:ro
-    expose:
-      - "9999"
+      - socket_vol:/var/run/sockets
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9999/ready || exit 1"]
       interval: 2s
-      timeout: 2s
-      retries: 15
-      start_period: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     deploy:
       resources:
         limits:
@@ -56,6 +58,13 @@ services:
       - "9999:9999"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - socket_vol:/var/run/sockets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9999/ready || exit 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
     deploy:
       resources:
         limits:
@@ -65,3 +74,6 @@ services:
 networks:
   default:
     driver: bridge
+
+volumes:
+  socket_vol:
